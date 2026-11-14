@@ -1,0 +1,18 @@
+package FFmpegAPI;
+
+{ FFmpeg binding - runtime. }
+
+{$DESCRIPTION 'FFmpeg binding - runtime'}
+{$RUNONLY}
+{$IMPLICITBUILD ON}
+
+requires
+  rtl;
+
+contains
+  FFmpeg.DynLib in '..\lib\FFmpeg.DynLib.pas',
+  FFmpeg.API in '..\lib\FFmpeg.API.pas',
+  FFmpeg.Media in '..\lib\FFmpeg.Media.pas',
+  FFmpeg.Components in '..\lib\FFmpeg.Components.pas';
+
+end.

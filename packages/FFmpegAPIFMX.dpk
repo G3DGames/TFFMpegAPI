@@ -1,0 +1,17 @@
+package FFmpegAPIFMX;
+
+{ FFmpeg binding for FireMonkey - runtime. }
+
+{$DESCRIPTION 'FFmpeg binding for FireMonkey - runtime'}
+{$RUNONLY}
+{$IMPLICITBUILD ON}
+
+requires
+  rtl,
+  fmx,
+  FFmpegAPI;
+
+contains
+  FFmpeg.FMX in '..\fmx\FFmpeg.FMX.pas';
+
+end.

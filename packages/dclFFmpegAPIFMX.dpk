@@ -1,0 +1,19 @@
+package dclFFmpegAPIFMX;
+
+{ FFmpeg binding for FireMonkey - design time. }
+
+{$DESCRIPTION 'FFmpeg binding for FireMonkey - design time'}
+{$DESIGNONLY}
+{$IMPLICITBUILD ON}
+
+requires
+  rtl,
+  fmx,
+  designide,
+  FFmpegAPI,
+  FFmpegAPIFMX;
+
+contains
+  FFmpeg.FMX.Reg in '..\fmx\FFmpeg.FMX.Reg.pas';
+
+end.
