@@ -75,7 +75,12 @@ the design-time package.
 - Say "PACKAGE REBUILD NEEDED" in capitals when a package's units or
   interface changed.
 
-Last number used: 01.
+Last number used: 02.
+
+Last push: 3a9dd6e ("1st push", 2026-11-14 ~22:34; checked: all 29 files
+of zip 01 identical apart from line endings). TWhisper's FFmpegAPI
+submodule points at it. NOT YET PUSHED: FFmpegAPI-02-path.zip on 3a9dd6e
+(the real folder of libraries found on PATH, Windows).
 
 ## Test notes
 - Test files are made locally: an M4B with 3 chapters and AAC audio, the
@@ -86,5 +91,12 @@ Last number used: 01.
   chapter decode to 16 kHz mono WAV, DRM refusal, and the component:
   Decode, DecodeChapter, DecodeAsync with CheckSynchronize, freeing while a
   decode runs, OnOpenFailed.
-- Not yet tested: Delphi compile and IDE install, a GPL or non-free build
-  against flpLGPL / flpRedistributable, macOS, Android.
+- Owner (2026-11-14, Delphi 13, Win64): packages built and installed,
+  TFFmpegAPI dropped on an FMX form; FFmpegConsole --check --lgpl with a
+  GPL v3 build on PATH refused it as it should - but the message said
+  "libraries in  are": a library found on PATH had no folder. Fixed in
+  zip 02 (TFFmpegDynLib.LoadedFileName: GetModuleFileName on Windows;
+  Linux / macOS still say "the system search path" for a bare-name load).
+- Not yet tested: a non-free build against flpRedistributable, macOS,
+  Android; the Windows branch of LoadedFileName is not compiled here (no
+  Windows units for FPC): owner's Delphi build is its test.

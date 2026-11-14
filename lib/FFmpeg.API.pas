@@ -286,6 +286,9 @@ type
     procedure CheckVersions;
     { Reads the licence and build options and applies APolicy. }
     procedure CheckLicence(APolicy: TFFmpegLicencePolicy);
+    { Folder of the libraries for messages: @link(Folder), or 'the system
+      search path' when it is not known. }
+    function FolderText: string;
   public
     { Loads FFmpeg from AFolder, or ('') the executable's folder and then
       the system search path. AWithVideo also loads swscale.
@@ -307,8 +310,9 @@ type
     property Flat: TFFmpegFlat read FFlat;
     { "FFmpeg avutil 60.26.100, ... (licence) from folder", for logs. }
     property Description: string read FDescription;
-    { Folder the libraries were loaded from ('' when found by name on the
-      system search path). }
+    { Folder the libraries were loaded from. On Windows always known (also
+      for libraries found on PATH); elsewhere '' when they were found by
+      name on the system search path. }
     property Folder: string read FFolder;
     { The build's licence as FFmpeg reports it, e.g. 'LGPL version 2.1 or
       later', 'GPL version 3 or later', 'nonfree and unredistributable'. }
@@ -483,9 +487,7 @@ begin
   FDescription := Format('FFmpeg avutil %s, swresample %s, avcodec %s, avformat %s%s (%s) from %s',
     [FFmpegVersionText(FFlat.avutil_version), FFmpegVersionText(FFlat.swresample_version),
      FFmpegVersionText(FFlat.avcodec_version), FFmpegVersionText(FFlat.avformat_version), Video,
-     FLicence, FFolder]);
-  if FFolder = '' then
-    FDescription := FDescription + 'the system search path';
+     FLicence, FolderText]);
 end;
 
 destructor TFFmpegLibrary.Destroy;
@@ -605,6 +607,14 @@ begin
         ExpectedMajor(I)]);
 end;
 
+function TFFmpegLibrary.FolderText: string;
+begin
+  if FFolder = '' then
+    Result := 'the system search path'
+  else
+    Result := FFolder;
+end;
+
 procedure TFFmpegLibrary.CheckLicence(APolicy: TFFmpegLicencePolicy);
 var
   Texts: array[0..4] of string;
@@ -643,11 +653,11 @@ begin
     FLicence := 'GPL (configured with --enable-gpl)';
   if NonFree and (APolicy in [flpRedistributable, flpLGPL]) then
     raise EFFmpegError.CreateFmt('The FFmpeg libraries in %s are a non-free build (%s): they may not ' +
-      'be redistributed. A redistributable build is needed.', [ExtractFilePath(FLibs[3].FileName),
+      'be redistributed. A redistributable build is needed.', [FolderText,
       FLicence]);
   if Gpl and (APolicy = flpLGPL) then
     raise EFFmpegError.CreateFmt('The FFmpeg libraries in %s are a GPL build (%s); this program accepts ' +
-      'LGPL builds only.', [ExtractFilePath(FLibs[3].FileName), FLicence]);
+      'LGPL builds only.', [FolderText, FLicence]);
 end;
 
 function TFFmpegLibrary.ErrorText(ACode: Integer): string;

@@ -58,7 +58,7 @@ interface
 uses
   SysUtils, Classes
   {$ifdef FPC}, DynLibs{$endif}
-  {$if defined(MSWINDOWS) and not defined(FPC)}, Windows{$endif}
+  {$ifdef MSWINDOWS}, Windows{$endif}
   {$if not defined(MSWINDOWS) and not defined(FPC)}, Posix.Dlfcn{$endif};
 
 type
@@ -109,6 +109,10 @@ type
       out AError: string): Boolean; static;
     { GetProcAddress without any error handling. }
     function RawSymbol(const AName: string): Pointer;
+    { The full file name of loaded library AHandle (Windows: from the
+      loader, so a library found on PATH gets its folder); AFallback where
+      that is not known. }
+    class function LoadedFileName(AHandle: TFFmpegLibHandle; const AFallback: string): string; static;
     { Raises @link(OnWarning) if assigned. }
     procedure Warn(const AMessage: string);
   public
@@ -167,7 +171,8 @@ type
 
     { Name the library was requested by. }
     property Name: string read FName;
-    { File the library was actually loaded from (best effort). }
+    { File the library was loaded from: the full path (on Windows also for a
+      library found on PATH; elsewhere the bare name in that case). }
     property FileName: string read FFileName;
     { Native handle. }
     property Handle: TFFmpegLibHandle read FHandle;
@@ -250,6 +255,21 @@ begin
   Result := AHandle <> InvalidFFmpegLibHandle;
 end;
 
+class function TFFmpegDynLib.LoadedFileName(AHandle: TFFmpegLibHandle; const AFallback: string): string;
+{$ifdef MSWINDOWS}
+var
+  Buf: array[0..MAX_PATH] of Char;
+  N: DWORD;
+{$endif}
+begin
+  Result := AFallback;
+  {$ifdef MSWINDOWS}
+  N := Windows.GetModuleFileName(HMODULE(AHandle), PChar(@Buf[0]), Length(Buf));
+  if (N > 0) and (N < DWORD(Length(Buf))) then
+    SetString(Result, PChar(@Buf[0]), N);
+  {$endif}
+end;
+
 class function TFFmpegDynLib.CandidatePaths(const AName: string): TStringList;
 var
   ExeDir: string;
@@ -299,7 +319,7 @@ begin
         Continue;
       end;
       if TryLoadFile(Paths[I], H, Err) then
-        Exit(TFFmpegDynLib.Create(AName, Paths[I], H));
+        Exit(TFFmpegDynLib.Create(AName, LoadedFileName(H, Paths[I]), H));
       Errors := Errors + sLineBreak + '  ' + Paths[I];
       if Err <> '' then
         Errors := Errors + ': ' + Err;
