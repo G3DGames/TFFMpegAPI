@@ -969,9 +969,9 @@ var
   Client: IAudioClient;
   Render: IAudioRenderClient;
   Padding: UINT32;
-  Want, Real: Integer;
+  Want, Real, Give: Integer;
   Data: PByte;
-  Running: Boolean;
+  Running, AtEnd: Boolean;
 begin
   Client := FClient as IAudioClient;
   Render := FRender as IAudioRenderClient;
@@ -1026,12 +1026,21 @@ begin
       FLock.Enter;
       try
         Real := TakeFrames(System.PSingle(Data), Want);
+        AtEnd := EndedLocked;
       finally
         FLock.Leave;
       end;
-      if Real < Want then
+      // Short of sound: before the end the rest is silence (the device keeps
+      // running through an underrun). After the end nothing but the real
+      // frames is handed over - silence would keep the device's buffer full
+      // for ever, its padding would never reach 0, and neither the clock nor
+      // Drained would get to the end.
+      Give := Want;
+      if AtEnd then
+        Give := Real
+      else if Real < Want then
         FillChar(PByte(Data)[Real * FChannels * SizeOf(Single)], (Want - Real) * FChannels * SizeOf(Single), 0);
-      Render.ReleaseBuffer(Want, 0);
+      Render.ReleaseBuffer(Give, 0);
       SignalSpace;
     end;
   finally

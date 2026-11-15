@@ -133,6 +133,9 @@ type
     FStartOffset: Double;
     { Backing field of @link(BitRate). }
     FBitRate: Int64;
+    { True once a decoder has read packets from the file: the demuxer is no
+      longer at the start, so the next read seeks, whichever decoder it is. }
+    FUsed: Boolean;
     { Reads the streams. }
     procedure ReadStreams;
     { Reads the chapters. }
@@ -194,8 +197,6 @@ type
     FStream: Integer;
     { Time base of the stream, seconds per unit. }
     FTimeBase: Double;
-    { True once something was read (the next read seeks). }
-    FUsed: Boolean;
     { Backing field of @link(DecodeErrors). }
     FDecodeErrors: Integer;
     { Backing field of @link(Cancelled). }
@@ -709,14 +710,16 @@ begin
   Result := False;
   Stop := False;
   FCancelled := False;
-  if FUsed or (AStart > 0) then
+  // the position is the file's (its demuxer's), not this decoder's: a new
+  // decoder on a file another one has read must seek, also to 0
+  if FFile.FUsed or (AStart > 0) then
   begin
     if FTimeBase > 0 then
       FFile.Check(F.av_seek_frame(FFile.Handle, FStream, Round((AStart + FFile.StartOffset) / FTimeBase),
         AVSEEK_FLAG_BACKWARD), 'seek in');
     F.avcodec_flush_buffers(FCodec);
   end;
-  FUsed := True;
+  FFile.FUsed := True;
   while not Stop do
   begin
     if FCancelled then

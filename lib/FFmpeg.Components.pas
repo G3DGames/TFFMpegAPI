@@ -164,7 +164,8 @@ type
     { Decodes chapter AIndex on the calling thread. }
     function DecodeChapter(AIndex: Integer): TFFmpegSamples;
     { Decodes AStart..AEnd on a worker thread; OnDecoded or OnDecodeFailed
-      follows on the main thread. One at a time.
+      follows on the main thread. One at a time; a handler may start the
+      next one (or close the file).
       @raises(EFFmpegError when the file is not open or a decode runs.) }
     procedure DecodeAsync(AStart: Double = 0; AEnd: Double = 0);
     { Asks a DecodeAsync in progress to stop (OnDecoded then gets what was
@@ -476,21 +477,32 @@ begin
 end;
 
 procedure TCustomFFmpegAudio.DecodeDone(AThread: TFFmpegDecodeThread);
+var
+  Samples: TFFmpegSamples;
+  Error: string;
+  StartS, EndS: Double;
 begin
+  // A handler may start the next decode, close the file or change it, and
+  // each of those frees AThread: take everything out of it first, and touch
+  // neither it nor Self's fields once a handler has run.
+  Samples := AThread.FSamples;
+  AThread.FSamples := nil;
+  Error := AThread.FError;
+  StartS := AThread.FStart;
+  EndS := AThread.FEnd;
   FBusy := False;
   try
-    if AThread.FError <> '' then
+    if Error <> '' then
     begin
       if Assigned(FOnDecodeFailed) then
-        FOnDecodeFailed(Self, AThread.FError);
+        FOnDecodeFailed(Self, Error);
     end
     else if Assigned(FOnDecoded) then
-      FOnDecoded(Self, AThread.FSamples, AThread.FStart, AThread.FEnd);
+      FOnDecoded(Self, Samples, StartS, EndS);
   except
     on E: Exception do
       ShowHandlerException(E);
   end;
-  AThread.FSamples := nil;
 end;
 
 function TCustomFFmpegAudio.CoverArt(out AData: TBytes; out AExtension: string): Boolean;

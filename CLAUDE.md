@@ -82,7 +82,7 @@ the design-time package.
   (which unit changed), and what to rebuild after them (programs, other
   repos' packages). Otherwise say "NO PACKAGE REBUILD", in capitals.
 
-Last number used: 07.
+Last number used: 08.
 
 Last push: 0761ff2 ("latest for Claude", checked): zips 04 and 05 match,
 but dclFFmpegAPIFMX.dproj was back on Win64 (zip 03's Win32 line lost) -
@@ -118,6 +118,36 @@ Owner (2026-11-15, Delphi 13, Windows, EpubReader with Moby-Dick): "All tests
 ran perfectly" - WASAPI sound, highlight in sync, pause / resume, seeks.
 Zip 06: an underrun is counted only once sound has started, so the wait for
 the first sound after Open or a seek no longer shows as 1 underrun.
+
+## Review fixes (zip 08, on top of 87cfd0b "Claude push")
+From a code review by reading (owner, 2026-11-15: "Code review", then "y" to
+patching the three main bugs). NOT COMPILED OR RUN here (no FPC, no FFmpeg
+libraries in that session): the owner's Delphi build and an FPC run are
+their test.
+- FFmpeg.Components, DecodeDone: samples, error and range are taken out of
+  the thread BEFORE the handler runs, and nothing is touched after it. A
+  handler that calls DecodeAsync / Close / sets FileName frees the thread;
+  before, the handler's const ASamples then dangled and the thread was
+  written to after it was freed.
+- FFmpeg.AudioOut, WASAPI: after MarkEnd only real frames are released to
+  the device (ReleaseBuffer(Real), also 0), no silence. Silence kept the
+  padding near the buffer size for ever, so SetDrained (Padding = 0) never
+  ran: Ended stayed False and the clock stopped ~100 ms short. TO TEST on
+  Windows: FFmpegConsole <file> --play to the end must stop by itself.
+- FFmpeg.Media: FUsed moved from TFFmpegDecoder to TFFmpegMediaFile (the
+  position is the demuxer's). Before, a second decoder on a file already
+  read (the component after SampleRate / Channels changed) did not seek for
+  a read from 0 and returned nothing. TO TEST: Decode(0, 10), SampleRate :=
+  16000, Decode(0, 10) - same length of sound both times.
+Found in the same review and NOT fixed yet: WASAPI device loss is silent
+(GetCurrentPadding fails for ever, no LastError); a Cancel just before Run
+is lost (Run resets FCancelled) and Cancel reads FDecoder while the worker
+frees it; any av_read_frame error counts as the end of the file;
+TFFmpegAudioDecoder.Create indexes Streams[AStream] before the range check;
+every Play reopens the file (moov scan + find_stream_info); Active := True
+fails silently without OnOpenFailed; the bare-name load uses the OS search
+path (current directory on Windows); the repository has no LICENSE of its
+own.
 
 ## Test notes
 - Test files are made locally: an M4B with 3 chapters and AAC audio, the

@@ -93,7 +93,9 @@ and `CoverArt` are there.
 - `DecodeAsync(Start, End)` decodes on a worker thread (with its own copy
   of the file open) and raises `OnDecoded` or `OnDecodeFailed` on the main
   thread. `CancelDecode` stops it; closing or freeing the component waits
-  for the thread and drops a result not yet delivered.
+  for the thread and drops a result not yet delivered. A handler may call
+  `DecodeAsync` again (chapter after chapter), close the file or change
+  it.
 - `SampleRate` / `Channels` (0 = the stream's) set the output format.
 - `LicencePolicy` and `LibraryFolder` choose the libraries; `Description`
   shows what was loaded.
