@@ -103,6 +103,41 @@ and `CoverArt` are there.
 A console program that uses `TCustomFFmpegAudio` with `DecodeAsync` must
 call `CheckSynchronize` to receive the events.
 
+## Playing sound (`TFFmpegAudioPlayer`)
+
+`FFmpeg.Player` plays any file FFmpeg reads on the platform's sound output,
+**streamed**: `TFFmpegAudioStream` decodes frame by frame from the playing
+position, resamples to the output's rate and channels and writes into the
+output's ring buffer, on a thread of its own - a whole audiobook in one M4B
+plays without being decoded into memory. `Position` is the output's
+**clock**: the time of the sound being heard now (what has really reached
+the device, less what still waits in it), so pictures or highlighted words
+timed by it stay in step.
+
+```pascal
+Player := TFFmpegAudioPlayer.Create(Lib);   // the platform's output
+Player.Open('book.m4b');
+Player.Play(125.0);                          // from 2:05 (a seek drops the buffer)
+... a timer: Caption := FormatFloat('0.00', Player.Position) ...
+Player.Pause;  Player.Resume;  Player.Stop;  Player.Ended;
+```
+
+`FFmpeg.AudioOut` - the outputs, one thread each:
+
+| Output | Platform | |
+|---|---|---|
+| `TFFmpegWasapiOutput` | Windows (Delphi) | WASAPI shared mode, 32-bit float at the device's rate, event driven (from SRDelphiFMX's MoviePlayerFMX) |
+| `TFFmpegPulseOutput` | Linux, SteamOS | PulseAudio's simple API (PipeWire's pulse server too), `libpulse-simple.so.0` loaded at run time |
+| `TFFmpegNullOutput` | all | silent; the clock runs on a timer |
+
+`TFFmpegAudioOutput.CreateDefault` picks the platform's output and falls
+back to the silent one, saying why (`TFFmpegAudioPlayer.OutputNote`): a
+reader still follows the text with no sound device. macOS (AudioQueue) and
+Android come later. `FFmpegConsole <file> --play [--start S]` tries it.
+
+A Free Pascal program on Linux / macOS must list `cthreads` first in its
+uses clause (threads).
+
 ## Copy-protected files
 
 Protected files are not read. `FFmpegMp4Protection` looks at an MPEG-4
@@ -205,6 +240,7 @@ python3 tools/ffmpeg_layout.py <FFmpeg include folder>   # 0 error(s)
 
 ## Not covered (yet)
 
+- Sound output on macOS (AudioQueue) and Android.
 - Video decoding (frames to RGB through swscale) - the streams are
   described and swscale is bound, nothing decodes them yet.
 - Encoding and muxing.

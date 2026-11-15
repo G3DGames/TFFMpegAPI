@@ -185,6 +185,8 @@
         <DCCReference Include="..\lib\FFmpeg.API.pas"/>
         <DCCReference Include="..\lib\FFmpeg.Media.pas"/>
         <DCCReference Include="..\lib\FFmpeg.Components.pas"/>
+        <DCCReference Include="..\lib\FFmpeg.AudioOut.pas"/>
+        <DCCReference Include="..\lib\FFmpeg.Player.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

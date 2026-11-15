@@ -13,6 +13,8 @@ contains
   FFmpeg.DynLib in '..\lib\FFmpeg.DynLib.pas',
   FFmpeg.API in '..\lib\FFmpeg.API.pas',
   FFmpeg.Media in '..\lib\FFmpeg.Media.pas',
-  FFmpeg.Components in '..\lib\FFmpeg.Components.pas';
+  FFmpeg.Components in '..\lib\FFmpeg.Components.pas',
+  FFmpeg.AudioOut in '..\lib\FFmpeg.AudioOut.pas',
+  FFmpeg.Player in '..\lib\FFmpeg.Player.pas';
 
 end.

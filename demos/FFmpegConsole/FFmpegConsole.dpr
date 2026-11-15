@@ -10,6 +10,10 @@
                          [--rate HZ] [--channels N]
                          (decode a range, or chapter N from 1, to 16-bit WAV)
     FFmpegConsole <file> --cover NAME      (write the cover art as NAME.jpg / .png)
+    FFmpegConsole <file> --play [--start S] [--seconds N]
+                         (play it on the sound output - WASAPI on Windows,
+                         PulseAudio on Linux, silent elsewhere - printing the
+                         player's clock once a second; N seconds, or to the end)
   --ffmpeg FOLDER: where FFmpeg's libraries are (default: next to the
            executable, then the system search path).
   --lgpl: accept LGPL builds only; --redistributable: refuse non-free builds.
@@ -23,12 +27,17 @@ program FFmpegConsole;
 {$APPTYPE CONSOLE}
 
 uses
+  {$ifdef FPC}{$ifdef UNIX}
+  cthreads,   // FPC on Linux / macOS: threads (the player's) need it first
+  {$endif}{$endif}
   SysUtils,
   Classes,
   DateUtils,
   // the library: DCUs of the runtime package FFmpegAPI (Delphi's Dcp folder)
   FFmpeg.API,
-  FFmpeg.Media;
+  FFmpeg.Media,
+  FFmpeg.AudioOut,
+  FFmpeg.Player;
 
 const
   { Bytes per 16-bit sample. }
@@ -120,6 +129,9 @@ var
   Started: TDateTime;
   S: TFileStream;
   FS: TFormatSettings;
+  PlayIt: Boolean;
+  PlaySeconds: Double;
+  Player: TFFmpegAudioPlayer;
 begin
   ExitCode := 1;
   Lib := nil;
@@ -140,6 +152,8 @@ begin
       Channels := 0;
       CheckOnly := False;
       WithVideo := False;
+      PlayIt := False;
+      PlaySeconds := 0;
       I := 1;
       while I <= ParamCount do
       begin
@@ -153,6 +167,13 @@ begin
           Policy := flpRedistributable
         else if Arg = '--video' then
           WithVideo := True
+        else if Arg = '--play' then
+          PlayIt := True
+        else if (Arg = '--seconds') and (I <= ParamCount) then
+        begin
+          PlaySeconds := StrToFloat(ParamStr(I), FS);
+          Inc(I);
+        end
         else if (Arg = '--ffmpeg') and (I <= ParamCount) then
         begin
           Folder := ParamStr(I);
@@ -212,6 +233,7 @@ begin
         WriteLn('       FFmpegConsole <file> [--ffmpeg FOLDER]');
         WriteLn('       FFmpegConsole <file> --wav OUT.wav [--start S] [--end S] [--chapter N] [--rate HZ] [--channels N]');
         WriteLn('       FFmpegConsole <file> --cover NAME');
+        WriteLn('       FFmpegConsole <file> --play [--start S] [--seconds N]');
         Exit;
       end;
 
@@ -291,6 +313,29 @@ begin
           WriteLn('WAV written to ', WavFile);
         finally
           Dec.Free;
+        end;
+      end;
+      if PlayIt then
+      begin
+        Player := TFFmpegAudioPlayer.Create(Lib);
+        try
+          WriteLn('Sound output: ', Player.Output.Description);
+          if Player.OutputNote <> '' then
+            WriteLn('NOTE: ', Player.OutputNote);
+          Player.Open(MediaName);
+          Player.Play(StartS);
+          Started := Now;
+          while not Player.Ended and ((PlaySeconds <= 0) or (MilliSecondsBetween(Now, Started) < PlaySeconds * 1000)) do
+          begin
+            Sleep(1000);
+            WriteLn(Format('  %s  (buffered %.2f s, underruns %d)', [TimeText(Player.Position),
+              Player.Output.Buffered, Player.Output.Underruns]));
+          end;
+          if Player.LastError <> '' then
+            WriteLn('ERROR: ', Player.LastError);
+          WriteLn(Format('Stopped at %s', [TimeText(Player.Position)]));
+        finally
+          Player.Free;
         end;
       end;
       ExitCode := 0;

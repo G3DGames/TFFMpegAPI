@@ -20,7 +20,8 @@ import os, re, uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-LIB = ["FFmpeg.DynLib", "FFmpeg.API", "FFmpeg.Media", "FFmpeg.Components"]
+LIB = ["FFmpeg.DynLib", "FFmpeg.API", "FFmpeg.Media", "FFmpeg.Components", "FFmpeg.AudioOut",
+       "FFmpeg.Player"]
 
 # Programs: 64-bit targets. The runtime packages also build for Win32, because
 # a 32-bit IDE loads them under the design-time package (the IDE never loads

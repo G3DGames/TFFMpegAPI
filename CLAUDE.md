@@ -75,12 +75,39 @@ the design-time package.
 - Say "PACKAGE REBUILD NEEDED" in capitals when a package's units or
   interface changed.
 
-Last number used: 02.
+Last number used: 05.
 
-Last push: 3a9dd6e ("1st push", 2026-11-14 ~22:34; checked: all 29 files
-of zip 01 identical apart from line endings). TWhisper's FFmpegAPI
-submodule points at it. NOT YET PUSHED: FFmpegAPI-02-path.zip on 3a9dd6e
-(the real folder of libraries found on PATH, Windows).
+Last push: 05532ee ("dproj", 2026-11-14 ~23:49: IDE re-save of the four
+.dproj files - platform blocks reordered, iOS / Android blocks added; checked:
+units, requires, platforms and Dcp output unchanged). Before it 54f7ab2 = zip
+02 (checked; the owner's FFmpegConsole --check showed the Windows library
+folder). NOT YET PUSHED: FFmpegAPI-03-win32.zip on 05532ee
+(dclFFmpegAPIFMX opens on Win32 again).
+
+THE OWNER BUILDS IN THE 32-BIT IDE (2026-11-14: "I always build on 32 bit cos
+64 doesn't have Mac etc" - Delphi 13's 64-bit IDE has no macOS / Linux /
+Android targets). The design package must open on Win32: the default-platform
+line of dclFFmpegAPIFMX.dproj is Win32; a save from the 64-bit IDE flips it to
+Win64 - set it back. Runtime packages are built for Win32 too.
+
+## Sound output and player (zip 04, owner 2026-11-15)
+The WhisperBooks reader plays a book's audio through FFmpeg, not FMX's
+TMediaPlayer (owner: "That's how MoviePlayerFMX does it",
+github.com/peardox/SRDelphiFMX; "the player in FFMPegAPI"; "it definitely
+needs to stream"). FFmpeg.AudioOut: ring buffer + clock in the base class
+(from Lenticular.AudioOutput), one thread per output owning the device;
+WASAPI (Delphi, Windows; adapted, plus Reset on a flush), PulseAudio simple
+API (Linux; libpulse-simple loaded at run time; 48 kHz stereo float, 100 ms
+buffer), Null (silent, timer clock; the fallback). FFmpeg.Player:
+TFFmpegAudioStream (a TFFmpegDecoder that hands every resampled frame to a
+sink; drops the frames before the start after a seek) and
+TFFmpegAudioPlayer (feed thread writing into the output; Position = clock).
+FFmpeg's licence: either GPL or LGPL is fine for the reader (owner) - no
+policy is forced; flpLGPL / flpRedistributable stay for distributors.
+Tested here (FPC 3.0, Linux, n8.1): stream == range decode (3,264,914
+samples, 0 difference); clock vs wall time within ~5 ms; pause holds; seek;
+end at 39.010 s of 39.003; PulseAudio: no server here -> fallback to silent
+with a note. NOT RUN: WASAPI (Windows only), PulseAudio playing (no server).
 
 ## Test notes
 - Test files are made locally: an M4B with 3 chapters and AAC audio, the
