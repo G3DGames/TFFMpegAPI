@@ -4,6 +4,16 @@ Read README.md first, then this file. Keep both up to date with every change.
 The rules follow TWhisper's CLAUDE.md (same owner, same conventions); where
 this file is silent, TWhisper's rules apply.
 
+## Handover - READ THIS FIRST (session 6, 2026-11-15 evening)
+The full handover (all four repositories, rules, results, open items) is
+at the top of TWhisper's and Epubunum's CLAUDE.md. For this repository:
+- Pushes checked: 105ffe7 = FFmpegAPI-11 (nothing delivered since).
+- NEXT here: macOS audio output (AudioQueue) - EpubReader is silent on
+  macOS until TFFmpegAudioPlayer has one; it is the biggest gap before
+  macOS (agreed order: Linux first, then macOS).
+- Offered, not wanted for now: chained atempo filters for speeds below
+  0.5x (the reader's slider is 0.5 - 1.5x by the owner's choice).
+
 ## Project
 Pascal binding of FFmpeg 8's shared libraries (avutil 60, swresample 6,
 avcodec 62, avformat 62, swscale 9), loaded DYNAMICALLY at run time: no
@@ -82,7 +92,7 @@ the design-time package.
   (which unit changed), and what to rebuild after them (programs, other
   repos' packages). Otherwise say "NO PACKAGE REBUILD", in capitals.
 
-Last number used: 11.
+Last number used: 12.
 
 Last push: 0761ff2 ("latest for Claude", checked): zips 04 and 05 match,
 but dclFFmpegAPIFMX.dproj was back on Win64 (zip 03's Win32 line lost) -
