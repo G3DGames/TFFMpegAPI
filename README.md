@@ -30,13 +30,16 @@ a **shared** build:
 
 | Platform | Files |
 |---|---|
-| Windows | `avutil-60.dll`, `swresample-6.dll`, `avcodec-62.dll`, `avformat-62.dll` (+ `swscale-9.dll` for video) |
-| Linux | `libavutil.so.60`, `libswresample.so.6`, `libavcodec.so.62`, `libavformat.so.62` (+ `libswscale.so.9`) |
+| Windows | `avutil-60.dll`, `swresample-6.dll`, `avcodec-62.dll`, `avformat-62.dll` (+ `swscale-9.dll` for video, `avfilter-11.dll` for the player's speed change) |
+| Linux | `libavutil.so.60`, `libswresample.so.6`, `libavcodec.so.62`, `libavformat.so.62` (+ `libswscale.so.9`, `libavfilter.so.11`) |
 | macOS | `libavutil.60.dylib`, ... |
 | Android | `libavutil.so`, ... (an APK holds only unversioned names; the version is checked after loading) |
 
 The usual single-file `ffmpeg.exe` downloads have no DLLs: take a
-"shared" build, or build one (see the licence section for which). Put the
+"shared" build, or build one (see the licence section for which) -
+[ffmpeg-dev](https://github.com/G3DGames/ffmpeg-dev) builds FFmpeg 8.1 LGPL
+with these libraries for every platform here (Windows with Visual
+Studio, Linux, macOS, Android). Put the
 libraries next to the executable, or pass their folder to
 `TFFmpegLibrary.Create` / set `TFFmpegAPI.LibraryFolder`; otherwise the
 system search path is used.
@@ -122,7 +125,22 @@ Player.Open('book.m4b');
 Player.Play(125.0);                          // from 2:05 (a seek drops the buffer)
 ... a timer: Caption := FormatFloat('0.00', Player.Position) ...
 Player.Pause;  Player.Resume;  Player.Stop;  Player.Ended;
+Player.PlayRange(130.20, 130.55);            // one word, then silence (Ended)
+Player.Speed := 0.8;                         // slower, the pitch unchanged
 ```
+
+- **`PlayRange(From, To)`** stops exactly at `To`: the stream stops feeding
+  the output there (sample-exact at speed 1), so nothing of what follows is
+  heard, and `Ended` turns True when it has played out. For a reader that
+  says one word or one sentence at a time.
+- **`Speed`** (0.5 .. 2) plays slower or faster at the same pitch, through
+  FFmpeg's `atempo` filter (`TFFmpegTempo`). Set while playing, it plays on
+  from the same place. `Position` stays the time in the file at any speed.
+  It needs **avfilter** (`avfilter-11.dll`, `libavfilter.so.11`, ...), loaded
+  on first use by `TFFmpegLibrary.LoadFilters` from the same folder; without
+  it the speed cannot change (`FiltersNote` says why) and playing is as
+  before. Through atempo a range's length is within ~10-20 ms of
+  (To - From) / Speed.
 
 `FFmpeg.AudioOut` - the outputs, one thread each:
 
@@ -135,7 +153,8 @@ Player.Pause;  Player.Resume;  Player.Stop;  Player.Ended;
 `TFFmpegAudioOutput.CreateDefault` picks the platform's output and falls
 back to the silent one, saying why (`TFFmpegAudioPlayer.OutputNote`): a
 reader still follows the text with no sound device. macOS (AudioQueue) and
-Android come later. `FFmpegConsole <file> --play [--start S]` tries it.
+Android come later. `FFmpegConsole <file> --play [--start S] [--end S]
+[--speed X]` tries it.
 
 A Free Pascal program on Linux / macOS must list `cthreads` first in its
 uses clause (threads).

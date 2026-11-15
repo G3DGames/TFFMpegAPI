@@ -10,10 +10,12 @@
                          [--rate HZ] [--channels N]
                          (decode a range, or chapter N from 1, to 16-bit WAV)
     FFmpegConsole <file> --cover NAME      (write the cover art as NAME.jpg / .png)
-    FFmpegConsole <file> --play [--start S] [--seconds N]
+    FFmpegConsole <file> --play [--start S] [--end S] [--seconds N] [--speed X]
                          (play it on the sound output - WASAPI on Windows,
                          PulseAudio on Linux, silent elsewhere - printing the
-                         player's clock once a second; N seconds, or to the end)
+                         player's clock once a second; N seconds, or to the end
+                         - or to --end exactly (PlayRange); --speed 0.5 .. 2
+                         plays slower / faster at the same pitch (avfilter))
   --ffmpeg FOLDER: where FFmpeg's libraries are (default: next to the
            executable, then the system search path).
   --lgpl: accept LGPL builds only; --redistributable: refuse non-free builds.
@@ -130,7 +132,7 @@ var
   S: TFileStream;
   FS: TFormatSettings;
   PlayIt: Boolean;
-  PlaySeconds: Double;
+  PlaySeconds, PlaySpeed: Double;
   Player: TFFmpegAudioPlayer;
 begin
   ExitCode := 1;
@@ -154,6 +156,7 @@ begin
       WithVideo := False;
       PlayIt := False;
       PlaySeconds := 0;
+      PlaySpeed := 1;
       I := 1;
       while I <= ParamCount do
       begin
@@ -169,6 +172,11 @@ begin
           WithVideo := True
         else if Arg = '--play' then
           PlayIt := True
+        else if (Arg = '--speed') and (I <= ParamCount) then
+        begin
+          PlaySpeed := StrToFloat(ParamStr(I), FS);
+          Inc(I);
+        end
         else if (Arg = '--seconds') and (I <= ParamCount) then
         begin
           PlaySeconds := StrToFloat(ParamStr(I), FS);
@@ -233,7 +241,7 @@ begin
         WriteLn('       FFmpegConsole <file> [--ffmpeg FOLDER]');
         WriteLn('       FFmpegConsole <file> --wav OUT.wav [--start S] [--end S] [--chapter N] [--rate HZ] [--channels N]');
         WriteLn('       FFmpegConsole <file> --cover NAME');
-        WriteLn('       FFmpegConsole <file> --play [--start S] [--seconds N]');
+        WriteLn('       FFmpegConsole <file> --play [--start S] [--end S] [--seconds N] [--speed X]');
         Exit;
       end;
 
@@ -323,17 +331,29 @@ begin
           if Player.OutputNote <> '' then
             WriteLn('NOTE: ', Player.OutputNote);
           Player.Open(MediaName);
-          Player.Play(StartS);
+          if PlaySpeed <> 1 then
+          begin
+            Player.Speed := PlaySpeed;   // loads avfilter
+            WriteLn(Format('Speed %.2f (atempo): %s', [Player.Speed, Lib.Description], FS));
+          end;
+          if EndS > StartS then
+          begin
+            WriteLn(Format('Range %s --> %s', [TimeText(StartS), TimeText(EndS)]));
+            Player.PlayRange(StartS, EndS);
+          end
+          else
+            Player.Play(StartS);
           Started := Now;
           while not Player.Ended and ((PlaySeconds <= 0) or (MilliSecondsBetween(Now, Started) < PlaySeconds * 1000)) do
           begin
-            Sleep(1000);
+            Sleep(250);
             WriteLn(Format('  %s  (buffered %.2f s, underruns %d)', [TimeText(Player.Position),
               Player.Output.Buffered, Player.Output.Underruns]));
           end;
           if Player.LastError <> '' then
             WriteLn('ERROR: ', Player.LastError);
-          WriteLn(Format('Stopped at %s', [TimeText(Player.Position)]));
+          WriteLn(Format('Stopped at %s after %.2f s (Ended %s)', [TimeText(Player.Position),
+            MilliSecondsBetween(Now, Started) / 1000, BoolToStr(Player.Ended, True)], FS));
         finally
           Player.Free;
         end;

@@ -13,6 +13,7 @@
   FFMPEG_AVCODEC_MAJOR = 62;
   FFMPEG_AVFORMAT_MAJOR = 62;
   FFMPEG_SWSCALE_MAJOR = 9;
+  FFMPEG_AVFILTER_MAJOR = 11;
 
 {$if defined(FFMPEG_CPU64)}
   // P64 (checked on x86_64-pc-windows-msvc, aarch64-unknown-linux-gnu, arm64-apple-macos, aarch64-linux-android, x86_64-unknown-linux-gnu, x86_64-apple-macos)

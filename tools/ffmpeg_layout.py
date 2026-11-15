@@ -90,7 +90,8 @@ VERSIONS = [('LIBAVUTIL_VERSION_MAJOR', 'FFMPEG_AVUTIL_MAJOR'),
             ('LIBSWRESAMPLE_VERSION_MAJOR', 'FFMPEG_SWRESAMPLE_MAJOR'),
             ('LIBAVCODEC_VERSION_MAJOR', 'FFMPEG_AVCODEC_MAJOR'),
             ('LIBAVFORMAT_VERSION_MAJOR', 'FFMPEG_AVFORMAT_MAJOR'),
-            ('LIBSWSCALE_VERSION_MAJOR', 'FFMPEG_SWSCALE_MAJOR')]
+            ('LIBSWSCALE_VERSION_MAJOR', 'FFMPEG_SWSCALE_MAJOR'),
+            ('LIBAVFILTER_VERSION_MAJOR', 'FFMPEG_AVFILTER_MAJOR')]
 
 # The nine targets of the components' platforms and the 32-bit IDE.
 TARGETS = {
@@ -122,6 +123,7 @@ def c_source():
     lines = ['#include <stddef.h>', '#include <libavformat/avformat.h>',
              '#include <libavcodec/avcodec.h>', '#include <libavutil/frame.h>',
              '#include <libswresample/swresample.h>', '#include <libswscale/swscale.h>',
+             '#include <libavfilter/version_major.h>',
              'unsigned long long ffmpeg_layout[] = {']
     for c, _ in VERSIONS:
         lines.append('  %s,' % c)
@@ -156,7 +158,7 @@ def main():
     inc = sys.argv[1]
     write = '--write' in sys.argv
     for h in ('libavformat/avformat.h', 'libavutil/avconfig.h', 'libswresample/swresample.h',
-              'libswscale/swscale.h'):
+              'libswscale/swscale.h', 'libavfilter/version_major.h'):
         if not os.path.isfile(os.path.join(inc, h)):
             sys.exit('%s not found under %s' % (h, inc))
     tmp = tempfile.mkdtemp(prefix='ffmpeg_layout_')

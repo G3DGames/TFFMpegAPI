@@ -12,6 +12,10 @@
     @item(Linux: libavutil.so.60, ...; macOS: libavutil.60.dylib, ...;
       Android: libavutil.so, ... (the version is checked after loading).)
   )
+  avfilter (FFmpeg's filters - the player's speed change uses atempo) is
+  loaded only when asked for, by @link(TFFmpegLibrary.LoadFilters): a
+  folder without it still plays, at the normal speed.
+
   The major versions must be the ones FFmpeg.Layout.inc was generated for
   (tools/ffmpeg_layout.py), because a few fields of FFmpeg's structs are
   read at fixed offsets; the constructor checks them, and checks the Pascal
@@ -149,6 +153,11 @@ type
     av_frame_alloc: function: Pointer; cdecl;
     { avutil: frees a frame and clears the pointer. }
     av_frame_free: procedure(var frame: Pointer); cdecl;
+    { avutil: releases a frame's data (the frame stays). }
+    av_frame_unref: procedure(frame: Pointer); cdecl;
+    { avutil: allocates a frame's buffers for its format, nb_samples and
+      ch_layout (align 0 = the default). }
+    av_frame_get_buffer: function(frame: Pointer; align: Int32): Int32; cdecl;
     { avutil: dictionary lookup (key '' with AV_DICT_IGNORE_SUFFIX walks
       all entries). }
     av_dict_get: function(m: Pointer; key: PAnsiChar; prev: PAVDictionaryEntry;
@@ -243,6 +252,31 @@ type
       dst: Pointer; dstStride: PInteger): Int32; cdecl;
     { swscale (video only): frees a context. }
     sws_freeContext: procedure(c: Pointer); cdecl;
+    { avfilter (after LoadFilters): packed version. }
+    avfilter_version: function: UInt32; cdecl;
+    { avfilter (after LoadFilters): licence text. }
+    avfilter_license: function: PAnsiChar; cdecl;
+    { avfilter (after LoadFilters): a filter by name ('atempo'). }
+    avfilter_get_by_name: function(name: PAnsiChar): Pointer; cdecl;
+    { avfilter (after LoadFilters): allocates a filter graph. }
+    avfilter_graph_alloc: function: Pointer; cdecl;
+    { avfilter (after LoadFilters): frees a graph and its filters, clears
+      the pointer. }
+    avfilter_graph_free: procedure(var graph: Pointer); cdecl;
+    { avfilter (after LoadFilters): creates a filter instance in a graph
+      with its options ('tempo=0.75'). }
+    avfilter_graph_create_filter: function(var filt_ctx: Pointer; filt: Pointer; name, args: PAnsiChar;
+      opaque, graph_ctx: Pointer): Int32; cdecl;
+    { avfilter (after LoadFilters): links an output pad to an input pad. }
+    avfilter_link: function(src: Pointer; srcpad: UInt32; dst: Pointer; dstpad: UInt32): Int32; cdecl;
+    { avfilter (after LoadFilters): checks and configures a graph. }
+    avfilter_graph_config: function(graphctx: Pointer; log_ctx: Pointer): Int32; cdecl;
+    { avfilter (after LoadFilters): gives a buffer source a frame (nil =
+      the end); flags 0 takes the frame's data and resets it. }
+    av_buffersrc_add_frame_flags: function(buffer_src: Pointer; frame: Pointer; flags: Int32): Int32; cdecl;
+    { avfilter (after LoadFilters): takes a filtered frame from a buffer
+      sink (AVERROR(EAGAIN): needs more input; AVERROR_EOF: the end). }
+    av_buffersink_get_frame: function(ctx: Pointer; frame: Pointer): Int32; cdecl;
   end;
 
   { Which FFmpeg builds a program accepts. }
@@ -261,8 +295,16 @@ type
   TFFmpegLibrary = class
   private
     { The libraries, in load order (avutil, swresample, avcodec, avformat,
-      swscale - the last nil without video). }
-    FLibs: array[0..4] of TFFmpegDynLib;
+      swscale - nil without video - and avfilter - nil until
+      LoadFilters). }
+    FLibs: array[0..5] of TFFmpegDynLib;
+    { The policy the libraries were loaded under (avfilter is checked by
+      it too). }
+    FPolicy: TFFmpegLicencePolicy;
+    { Backing field of @link(HasFilters). }
+    FHasFilters: Boolean;
+    { Backing field of @link(FiltersNote). }
+    FFiltersNote: string;
     { Backing field of @link(Flat). }
     FFlat: TFFmpegFlat;
     { Backing field of @link(Description). }
@@ -302,6 +344,12 @@ type
     destructor Destroy; override;
     { FFmpeg's text for an error code. }
     function ErrorText(ACode: Integer): string;
+    { Loads avfilter (from the folder the others came from) for filters -
+      the player's speed change. True when it is (or already was) loaded;
+      False, with the reason in @link(FiltersNote), when it is missing, of
+      another major version or of a licence the policy refuses. Call it
+      from one thread, before the filters are used. }
+    function LoadFilters: Boolean;
     { File name of library AStem ('avutil', ...) with major version AMajor
       on this platform: avutil-60.dll, libavutil.so.60, libavutil.60.dylib,
       and on Android libavutil.so (an APK holds no versioned names). }
@@ -323,6 +371,10 @@ type
     property Warning: string read FWarning;
     { swscale was loaded (video). }
     property HasVideo: Boolean read FHasVideo;
+    { avfilter was loaded (@link(LoadFilters)). }
+    property HasFilters: Boolean read FHasFilters;
+    { Why LoadFilters failed ('' when it did not). }
+    property FiltersNote: string read FFiltersNote;
   end;
 
   { Raised for FFmpeg errors. }
@@ -349,7 +401,7 @@ implementation
 
 const
   { Library stems in load order (each needs the ones before it). }
-  STEMS: array[0..4] of string = ('avutil', 'swresample', 'avcodec', 'avformat', 'swscale');
+  STEMS: array[0..5] of string = ('avutil', 'swresample', 'avcodec', 'avformat', 'swscale', 'avfilter');
 
 function FFmpegAt(AP: Pointer; AOffset: Integer): Pointer;
 begin
@@ -392,8 +444,9 @@ begin
     1: Result := FFMPEG_SWRESAMPLE_MAJOR;
     2: Result := FFMPEG_AVCODEC_MAJOR;
     3: Result := FFMPEG_AVFORMAT_MAJOR;
+    4: Result := FFMPEG_SWSCALE_MAJOR;
   else
-    Result := FFMPEG_SWSCALE_MAJOR;
+    Result := FFMPEG_AVFILTER_MAJOR;
   end;
 end;
 
@@ -465,6 +518,7 @@ var
   Layout, Video: string;
 begin
   inherited Create;
+  FPolicy := APolicy;
   Layout := FFmpegCheckLayout;
   if Layout <> '' then
     raise EFFmpegError.Create(Layout);
@@ -534,6 +588,8 @@ begin
     U.Bind(FFlat.av_log_set_level, 'av_log_set_level');
     U.Bind(FFlat.av_frame_alloc, 'av_frame_alloc');
     U.Bind(FFlat.av_frame_free, 'av_frame_free');
+    U.Bind(FFlat.av_frame_unref, 'av_frame_unref');
+    U.Bind(FFlat.av_frame_get_buffer, 'av_frame_get_buffer');
     U.Bind(FFlat.av_dict_get, 'av_dict_get');
     U.Bind(FFlat.av_strerror, 'av_strerror');
     U.Bind(FFlat.av_channel_layout_default, 'av_channel_layout_default');
@@ -658,6 +714,80 @@ begin
   if Gpl and (APolicy = flpLGPL) then
     raise EFFmpegError.CreateFmt('The FFmpeg libraries in %s are a GPL build (%s); this program accepts ' +
       'LGPL builds only.', [FolderText, FLicence]);
+end;
+
+function TFFmpegLibrary.LoadFilters: Boolean;
+var
+  Name, Lic: string;
+  L: TFFmpegDynLib;
+begin
+  if FHasFilters then
+    Exit(True);
+  Result := False;
+  FFiltersNote := '';
+  Name := LibraryFileName(STEMS[5], ExpectedMajor(5));
+  if FFolder <> '' then
+    Name := IncludeTrailingPathDelimiter(FFolder) + Name;
+  L := nil;
+  try
+    // avfilter needs swscale: loaded first, from the same folder - neither
+    // Windows' LoadLibrary nor dlopen looks for a library's dependencies
+    // in its own folder, only among the libraries already loaded
+    if FLibs[4] = nil then
+      LoadLib(4, FFolder);
+    try
+      L := TFFmpegDynLib.Load(Name, True);
+    except
+      on E: EFFmpegDynLibError do
+        raise EFFmpegError.CreateFmt('FFmpeg''s filter library (%s) was not found - no speed change: %s',
+          [LibraryFileName(STEMS[5], ExpectedMajor(5)), E.Message]);
+    end;
+    try
+      L.Bind(FFlat.avfilter_version, 'avfilter_version');
+      L.Bind(FFlat.avfilter_license, 'avfilter_license');
+      L.Bind(FFlat.avfilter_get_by_name, 'avfilter_get_by_name');
+      L.Bind(FFlat.avfilter_graph_alloc, 'avfilter_graph_alloc');
+      L.Bind(FFlat.avfilter_graph_free, 'avfilter_graph_free');
+      L.Bind(FFlat.avfilter_graph_create_filter, 'avfilter_graph_create_filter');
+      L.Bind(FFlat.avfilter_link, 'avfilter_link');
+      L.Bind(FFlat.avfilter_graph_config, 'avfilter_graph_config');
+      L.Bind(FFlat.av_buffersrc_add_frame_flags, 'av_buffersrc_add_frame_flags');
+      L.Bind(FFlat.av_buffersink_get_frame, 'av_buffersink_get_frame');
+    except
+      on E: EFFmpegDynLibError do
+        raise EFFmpegError.Create('FFmpeg: ' + E.Message);
+    end;
+    if Integer(FFlat.avfilter_version shr 16) <> ExpectedMajor(5) then
+      raise EFFmpegError.CreateFmt('FFmpeg avfilter is version %s; this binding was made for major %d',
+        [FFmpegVersionText(FFlat.avfilter_version), ExpectedMajor(5)]);
+    // the same licence rules as the other libraries
+    Lic := LowerCase(FFmpegText(FFlat.avfilter_license));
+    if (Pos('nonfree', Lic) > 0) and (FPolicy in [flpRedistributable, flpLGPL]) then
+      raise EFFmpegError.Create('FFmpeg avfilter is a non-free build: it may not be redistributed');
+    if (Pos('gpl', Lic) > 0) and (Pos('lgpl', Lic) = 0) and (FPolicy = flpLGPL) then
+      raise EFFmpegError.Create('FFmpeg avfilter is a GPL build; this program accepts LGPL builds only');
+    FLibs[5] := L;
+    FHasFilters := True;
+    FDescription := FDescription + ', avfilter ' + FFmpegVersionText(FFlat.avfilter_version);
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      FFiltersNote := E.Message;
+      // nothing of a half-loaded avfilter stays callable
+      FFlat.avfilter_version := nil;
+      FFlat.avfilter_license := nil;
+      FFlat.avfilter_get_by_name := nil;
+      FFlat.avfilter_graph_alloc := nil;
+      FFlat.avfilter_graph_free := nil;
+      FFlat.avfilter_graph_create_filter := nil;
+      FFlat.avfilter_link := nil;
+      FFlat.avfilter_graph_config := nil;
+      FFlat.av_buffersrc_add_frame_flags := nil;
+      FFlat.av_buffersink_get_frame := nil;
+      L.Free;
+    end;
+  end;
 end;
 
 function TFFmpegLibrary.ErrorText(ACode: Integer): string;
