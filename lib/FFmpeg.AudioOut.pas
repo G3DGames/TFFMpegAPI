@@ -175,7 +175,8 @@ type
     function Buffered: Double;
     { True once the end was marked and every frame played. }
     function Drained: Boolean;
-    { Times the device ran short of sound. }
+    { Times the device ran short of sound once it had started (the wait for
+      the first sound after opening or a seek is not counted). }
     function Underruns: Int64;
     { The output thread's first error while playing, '' if none. }
     function LastError: string;
@@ -426,7 +427,10 @@ begin
   end;
   Dec(FFill, Result);
   Inc(FRealWritten, Result);
-  if (Result < AFrames) and not FEnded and FWantPlay then
+  // a short take counts only once sound has started (FRealWritten above
+  // this take's own frames): waiting for the first sound after Open or a
+  // seek is not an underrun
+  if (Result < AFrames) and not FEnded and FWantPlay and (FRealWritten > Result) then
     Inc(FUnderruns);
 end;
 

@@ -72,17 +72,22 @@ the design-time package.
   `python3 tools/project_check.py`, `python3 tools/ffmpeg_layout.py
   <FFmpeg include folder>` (0 errors), and an FPC compile of lib/ and the
   console demo with a run against a test file.
-- Say "PACKAGE REBUILD NEEDED" in capitals when a package's units or
-  interface changed.
+- PACKAGE REBUILDS (owner, 2026-11-15: "Add rule"). Every delivery says
+  one or the other. When a package must be rebuilt, the message carries,
+  exactly, a blank line, the banner, a blank line, then the details:
 
-Last number used: 05.
+      =====> PACKAGE REBUILD NEEDED <=====
 
-Last push: 05532ee ("dproj", 2026-11-14 ~23:49: IDE re-save of the four
-.dproj files - platform blocks reordered, iOS / Android blocks added; checked:
-units, requires, platforms and Dcp output unchanged). Before it 54f7ab2 = zip
-02 (checked; the owner's FFmpegConsole --check showed the Windows library
-folder). NOT YET PUSHED: FFmpegAPI-03-win32.zip on 05532ee
-(dclFFmpegAPIFMX opens on Win32 again).
+  Details of the package rebuilds: which packages, in build order, why
+  (which unit changed), and what to rebuild after them (programs, other
+  repos' packages). Otherwise say "NO PACKAGE REBUILD", in capitals.
+
+Last number used: 07.
+
+Last push: 0761ff2 ("latest for Claude", checked): zips 04 and 05 match,
+but dclFFmpegAPIFMX.dproj was back on Win64 (zip 03's Win32 line lost) -
+set to Win32 again in zip 06. Before it 05532ee (IDE re-save of the four
+.dproj files) and 54f7ab2 = zip 02.
 
 THE OWNER BUILDS IN THE 32-BIT IDE (2026-11-14: "I always build on 32 bit cos
 64 doesn't have Mac etc" - Delphi 13's 64-bit IDE has no macOS / Linux /
@@ -107,7 +112,12 @@ policy is forced; flpLGPL / flpRedistributable stay for distributors.
 Tested here (FPC 3.0, Linux, n8.1): stream == range decode (3,264,914
 samples, 0 difference); clock vs wall time within ~5 ms; pause holds; seek;
 end at 39.010 s of 39.003; PulseAudio: no server here -> fallback to silent
-with a note. NOT RUN: WASAPI (Windows only), PulseAudio playing (no server).
+with a note. NOT RUN here: WASAPI (Windows only), PulseAudio playing (no
+server).
+Owner (2026-11-15, Delphi 13, Windows, EpubReader with Moby-Dick): "All tests
+ran perfectly" - WASAPI sound, highlight in sync, pause / resume, seeks.
+Zip 06: an underrun is counted only once sound has started, so the wait for
+the first sound after Open or a seek no longer shows as 1 underrun.
 
 ## Test notes
 - Test files are made locally: an M4B with 3 chapters and AAC audio, the
