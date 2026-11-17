@@ -312,8 +312,12 @@ begin
     for I := 0 to Paths.Count - 1 do
     begin
       // Explicit paths that do not exist are listed but not loaded;
-      // the bare name is always tried (OS search path)
-      if (ExtractFilePath(Paths[I]) <> '') and not FileExists(Paths[I]) then
+      // the bare name is always tried (OS search path). macOS 11 and later
+      // keep the system's libraries and frameworks in the dyld shared cache,
+      // not on disk: a /System/Library/ or /usr/lib/ path is tried anyway
+      if (ExtractFilePath(Paths[I]) <> '') and not FileExists(Paths[I])
+        {$ifdef FFMPEG_MACOS} and not ((Pos('/System/Library/', Paths[I]) = 1) or
+        (Pos('/usr/lib/', Paths[I]) = 1)){$endif} then
       begin
         Errors := Errors + sLineBreak + '  ' + Paths[I] + ': not present';
         Continue;

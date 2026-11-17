@@ -9,9 +9,8 @@ The full handover (all four repositories, rules, results, open items) is
 at the top of TWhisper's and Epubunum's CLAUDE.md. For this repository:
 - Pushes checked: 105ffe7 = FFmpegAPI-11; 3edcfa3 = FFmpegAPI-12 (this
   handover, CLAUDE.md only). FFmpegAPI-13 = the review fixes below.
-- NEXT here: macOS audio output (AudioQueue) - EpubReader is silent on
-  macOS until TFFmpegAudioPlayer has one; it is the biggest gap before
-  macOS (agreed order: Linux first, then macOS).
+- 8e644d4 = FFmpegAPI-13 (pushed). FFmpegAPI-14 = the macOS output
+  (AudioQueue), below - NOT COMPILED, the owner's Mac is its first test.
 - Offered, not wanted for now: chained atempo filters for speeds below
   0.5x (the reader's slider is 0.5 - 1.5x by the owner's choice).
 
@@ -95,7 +94,7 @@ the design-time package.
   (which unit changed), and what to rebuild after them (programs, other
   repos' packages). Otherwise say "NO PACKAGE REBUILD", in capitals.
 
-Last number used: 13.
+Last number used: 14.
 
 Last push: 0761ff2 ("latest for Claude", checked): zips 04 and 05 match,
 but dclFFmpegAPIFMX.dproj was back on Win64 (zip 03's Win32 line lost) -
@@ -310,3 +309,39 @@ Deployment (owner): FFmpeg's DLLs next to the exe (searched first).
 - Not yet tested: a non-free build against flpRedistributable, macOS,
   Android; the Windows branch of LoadedFileName is not compiled here (no
   Windows units for FPC): owner's Delphi build is its test.
+
+## macOS sound output (zip 14, on top of 8e644d4 = zip 13)
+Owner, 2026-11-17, after EpubReader ran on macOS ARM (Steam test build)
+with no sound: "Mac Sound".
+- FFmpeg.AudioOut: TFFmpegAudioQueueOutput (FFMPEG_MACOS), CreateDefault's
+  choice there. AudioToolbox's AudioQueue loaded at run time (as
+  libpulse): AudioQueueNewOutput (no run loop: callbacks on the queue's
+  own thread), AllocateBuffer, EnqueueBuffer, Start, Pause, Stop, Reset,
+  Dispose. 48 kHz stereo 32-bit float ('lpcm', float | packed; the queue
+  converts to the device), four 25 ms buffers (100 ms, as PulseAudio's).
+  The output thread fills the free buffers from the ring while playing:
+  real sound, silence after it before the end (underruns keep the queue
+  running), only the real frames after the end; starts the queue after
+  filling, pauses it on Pause. CLOCK: the callback frees the buffer and,
+  when it is of the current generation and no flush is pending, adds its
+  REAL frames to FPlayedReal -> ReportPlayed (the base class smooths
+  between reports). A seek (TakeResetRequest): Inc(FCurGen),
+  FPlayedReal := 0, AudioQueueReset (the buffers come back through the
+  callback, not counted). Drained: ended, ring empty, no buffer with the
+  queue. An enqueue / start error -> LastError, the thread ends (the
+  player opens the default device afresh at its next Play).
+- Records TAqStreamDescription (40 bytes) and TAqBuffer (64-bit layout
+  with the padding written out: fields at 0, 8, 16, 24, 32, 40, 48 -
+  checked against the C layout with ctypes).
+- FFmpeg.DynLib.Load: on macOS an explicit path under /System/Library/ or
+  /usr/lib/ is tried even when it is not a file - since macOS 11 the
+  system's frameworks live in the dyld shared cache, so
+  FileExists('/System/Library/Frameworks/AudioToolbox.framework/
+  AudioToolbox') is False and the path was skipped before.
+NOT COMPILED (no Delphi / FPC here); pasdoc_check, project_check 0.
+TO TEST (owner's Mac, EpubReader OSXARM64): the debug log's "sound
+output:" line names AudioQueue; play / pause / sentence steps (seeks) /
+speed slider; the highlight follows the voice (clock); the end of an
+audio file moves on to the next (Drained); a long play has no growing
+drift; unplugging headphones.
+

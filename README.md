@@ -149,12 +149,12 @@ Player.Speed := 0.8;                         // slower, the pitch unchanged
 |---|---|---|
 | `TFFmpegWasapiOutput` | Windows (Delphi) | WASAPI shared mode, 32-bit float at the device's rate, event driven (from SRDelphiFMX's MoviePlayerFMX) |
 | `TFFmpegPulseOutput` | Linux, SteamOS | PulseAudio's simple API (PipeWire's pulse server too), `libpulse-simple.so.0` loaded at run time |
+| `TFFmpegAudioQueueOutput` | macOS | AudioToolbox's AudioQueue on the default output device, 48 kHz stereo 32-bit float in four 25 ms buffers; AudioToolbox loaded at run time |
 | `TFFmpegNullOutput` | all | silent; the clock runs on a timer |
 
 `TFFmpegAudioOutput.CreateDefault` picks the platform's output and falls
 back to the silent one, saying why (`TFFmpegAudioPlayer.OutputNote`): a
-reader still follows the text with no sound device. macOS (AudioQueue) and
-Android come later. `FFmpegConsole <file> --play [--start S] [--end S]
+reader still follows the text with no sound device. Android comes later. `FFmpegConsole <file> --play [--start S] [--end S]
 [--speed X]` tries it.
 
 An output whose device goes away while it plays (headphones unplugged,
@@ -268,7 +268,7 @@ python3 tools/ffmpeg_layout.py <FFmpeg include folder>   # 0 error(s)
 
 ## Not covered (yet)
 
-- Sound output on macOS (AudioQueue) and Android.
+- Sound output on Android.
 - Video decoding (frames to RGB through swscale) - the streams are
   described and swscale is bound, nothing decodes them yet.
 - Encoding and muxing.

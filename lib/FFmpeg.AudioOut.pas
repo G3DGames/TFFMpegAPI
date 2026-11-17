@@ -12,13 +12,14 @@
       from Lenticular.AudioOutput in SRDelphiFMX's MoviePlayerFMX). Delphi.)
     @item(@link(TFFmpegPulseOutput) - Linux (SteamOS's PipeWire included),
       PulseAudio's simple API, libpulse-simple.so.0 loaded at run time.)
+    @item(@link(TFFmpegAudioQueueOutput) - macOS, AudioToolbox's AudioQueue
+      on the default output device, AudioToolbox loaded at run time.)
     @item(@link(TFFmpegNullOutput) - every platform: no sound, the clock
       runs on a timer. The fallback when no device opens, so a reader still
       follows the text; also for tests.)
   )
   @link(TFFmpegAudioOutput.CreateDefault) picks the platform's output and
-  falls back to the null one, saying why. macOS (AudioQueue) and Android
-  follow later.
+  falls back to the null one, saying why. Android follows later.
 
   @link(TFFmpegAudioOutput.Clock) is the time (on the source's time line,
   see @link(TFFmpegAudioOutput.Flush)) of the sound the listener hears now:
@@ -150,7 +151,8 @@ type
     constructor Create(ABufferSeconds: Double = 2.0); virtual;
     { Stops playing and closes the device. }
     destructor Destroy; override;
-    { The platform's output (WASAPI on Windows, PulseAudio on Linux), or a
+    { The platform's output (WASAPI on Windows, PulseAudio on Linux,
+      AudioQueue on macOS), or a
       @link(TFFmpegNullOutput) when it cannot be opened - ANote then says
       why ('' when the platform's output opened). }
     class function CreateDefault(out ANote: string; ABufferSeconds: Double = 2.0): TFFmpegAudioOutput;
@@ -250,6 +252,117 @@ type
       the server's latency. }
     procedure BackendRun(AThread: TFFmpegAudioThread); override;
     { Frees the stream and the library. }
+    procedure BackendClose; override;
+  end;
+{$endif}
+
+{$ifdef FFMPEG_MACOS}
+  { AudioToolbox's AudioStreamBasicDescription. }
+  TAqStreamDescription = record
+    { Frames a second. }
+    mSampleRate: Double;
+    { kAudioFormatLinearPCM ('lpcm'). }
+    mFormatID: UInt32;
+    { kAudioFormatFlagIsFloat or kAudioFormatFlagIsPacked. }
+    mFormatFlags: UInt32;
+    { Bytes a packet (= a frame for PCM). }
+    mBytesPerPacket: UInt32;
+    { Frames a packet (1 for PCM). }
+    mFramesPerPacket: UInt32;
+    { Bytes a frame. }
+    mBytesPerFrame: UInt32;
+    { Channels. }
+    mChannelsPerFrame: UInt32;
+    { Bits a sample. }
+    mBitsPerChannel: UInt32;
+    { Must be 0. }
+    mReserved: UInt32;
+  end;
+
+  { AudioToolbox's AudioQueueBuffer, 64-bit layout (the padding written
+    out, so the record has it whatever the alignment setting). }
+  TAqBuffer = record
+    { Bytes the buffer holds at most. }
+    mAudioDataBytesCapacity: UInt32;
+    { Padding before the pointer. }
+    Pad1: UInt32;
+    { The sound. }
+    mAudioData: Pointer;
+    { Bytes of sound in it. }
+    mAudioDataByteSize: UInt32;
+    { Padding before the pointer. }
+    Pad2: UInt32;
+    { Ours: the buffer's index. }
+    mUserData: Pointer;
+    { Packet descriptions it holds at most (0 for PCM). }
+    mPacketDescriptionCapacity: UInt32;
+    { Padding before the pointer. }
+    Pad3: UInt32;
+    { Packet descriptions (unused for PCM). }
+    mPacketDescriptions: Pointer;
+    { Packet descriptions in use. }
+    mPacketDescriptionCount: UInt32;
+  end;
+  { A pointer to a TAqBuffer (AudioQueueBufferRef). }
+  PAqBuffer = ^TAqBuffer;
+
+  { macOS: AudioToolbox's AudioQueue on the default output device, 48 kHz
+    stereo 32-bit float (the queue converts to the device's rate), a few
+    short buffers filled from the ring. The clock counts the real frames of
+    the buffers the queue has played (its callbacks). }
+  TFFmpegAudioQueueOutput = class(TFFmpegAudioOutput)
+  private
+    { AudioToolbox. }
+    FLib: TFFmpegDynLib;
+    { The AudioQueue (AudioQueueRef). }
+    FQueue: Pointer;
+    { The queue's buffers. }
+    FBuffers: array of PAqBuffer;
+    { Each buffer is with the queue (guarded by FLock). }
+    FBusy: array of Boolean;
+    { Real frames in each buffer (the rest is silence). }
+    FReal: array of Integer;
+    { The generation each buffer was filled in (a seek starts a new one:
+      buffers of an older one are not counted as played). }
+    FGen: array of Integer;
+    { The current generation. }
+    FCurGen: Integer;
+    { Real frames of the current generation the queue has played. }
+    FPlayedReal: Int64;
+    { Buffers with the queue. }
+    FInFlight: Integer;
+    { Frames a buffer holds. }
+    FBufferFrames: Integer;
+    { Set by the callback: a buffer came back. }
+    FWake: TEvent;
+    { AudioQueueNewOutput. }
+    FNewOutput: function(inFormat, inCallbackProc, inUserData, inCallbackRunLoop, inCallbackRunLoopMode: Pointer;
+      inFlags: UInt32; outAQ: PPointer): Int32; cdecl;
+    { AudioQueueAllocateBuffer. }
+    FAllocateBuffer: function(inAQ: Pointer; inBufferByteSize: UInt32; outBuffer: Pointer): Int32; cdecl;
+    { AudioQueueEnqueueBuffer. }
+    FEnqueueBuffer: function(inAQ: Pointer; inBuffer: PAqBuffer; inNumPacketDescs: UInt32;
+      inPacketDescs: Pointer): Int32; cdecl;
+    { AudioQueueStart. }
+    FStart: function(inAQ: Pointer; inStartTime: Pointer): Int32; cdecl;
+    { AudioQueuePause. }
+    FPause: function(inAQ: Pointer): Int32; cdecl;
+    { AudioQueueStop. }
+    FStop: function(inAQ: Pointer; inImmediate: Byte): Int32; cdecl;
+    { AudioQueueReset. }
+    FReset: function(inAQ: Pointer): Int32; cdecl;
+    { AudioQueueDispose. }
+    FDispose: function(inAQ: Pointer; inImmediate: Byte): Int32; cdecl;
+    { The queue gave ABuffer back (on the queue's own thread): free it,
+      count its real frames as played when it is of this generation. }
+    procedure BufferDone(ABuffer: PAqBuffer);
+  protected
+    { Makes the queue and its buffers: 48 kHz stereo float. }
+    procedure BackendOpen; override;
+    { Fills the free buffers while playing, starts and pauses the queue,
+      drops what it holds on a seek. }
+    procedure BackendRun(AThread: TFFmpegAudioThread); override;
+    { Stops and disposes of the queue, unloads AudioToolbox. }
     procedure BackendClose; override;
   end;
 {$endif}
@@ -398,6 +511,8 @@ begin
   Cls := TFFmpegWasapiOutput;
   {$elseif defined(FFMPEG_LINUX)}
   Cls := TFFmpegPulseOutput;
+  {$elseif defined(FFMPEG_MACOS)}
+  Cls := TFFmpegAudioQueueOutput;
   {$ifend}
   if Cls <> nil then
     try
@@ -814,6 +929,233 @@ begin
   if (FStream <> nil) and Assigned(FFree) then
     FFree(FStream);
   FStream := nil;
+  FreeAndNil(FLib);
+end;
+{$endif}
+
+{$ifdef FFMPEG_MACOS}
+{ TFFmpegAudioQueueOutput }
+
+const
+  { AudioToolbox (macOS 11 and later: in the dyld shared cache, not on disk -
+    TFFmpegDynLib.Load tries /System/Library/ paths anyway). }
+  AUDIOTOOLBOX_LIB = '/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox';
+  { kAudioFormatLinearPCM: 'lpcm'. }
+  AQ_FORMAT_LINEAR_PCM = $6C70636D;
+  { kAudioFormatFlagIsFloat or kAudioFormatFlagIsPacked. }
+  AQ_FLAGS_FLOAT_PACKED = $1 or $8;
+  { Buffers the queue gets. }
+  AQ_BUFFERS = 4;
+  { Sound in a buffer, ms (four: 100 ms in the queue, as PulseAudio's). }
+  AQ_PIECE_MS = 25;
+
+{ The queue's output callback (AudioQueueOutputCallback), on the queue's
+  own thread: a buffer has been played. }
+procedure AqOutputCallback(inUserData, inAQ: Pointer; inBuffer: PAqBuffer); cdecl;
+begin
+  TFFmpegAudioQueueOutput(inUserData).BufferDone(inBuffer);
+end;
+
+{ Raises when an AudioQueue call failed. }
+procedure CheckAq(AStatus: Int32; const AStep: string);
+begin
+  if AStatus <> 0 then
+    raise Exception.CreateFmt('Sound output: %s failed (OSStatus %d)', [AStep, AStatus]);
+end;
+
+procedure TFFmpegAudioQueueOutput.BufferDone(ABuffer: PAqBuffer);
+var
+  I: Integer;
+begin
+  I := Integer(NativeInt(ABuffer^.mUserData));
+  FLock.Enter;
+  try
+    if (I >= 0) and (I <= High(FBusy)) then
+    begin
+      if FBusy[I] then
+      begin
+        FBusy[I] := False;
+        Dec(FInFlight);
+      end;
+      // played sound of this generation (a buffer dropped by a seek, or
+      // coming back after the writer asked for one, is not)
+      if (FGen[I] = FCurGen) and not FResetWanted then
+      begin
+        Inc(FPlayedReal, FReal[I]);
+        ReportPlayed(FPlayedReal);
+      end;
+      FReal[I] := 0;
+    end;
+  finally
+    FLock.Leave;
+  end;
+  if FWake <> nil then
+    FWake.SetEvent;
+end;
+
+procedure TFFmpegAudioQueueOutput.BackendOpen;
+var
+  Desc: TAqStreamDescription;
+  I: Integer;
+begin
+  FLib := TFFmpegDynLib.Load(AUDIOTOOLBOX_LIB, True);
+  FLib.Bind(FNewOutput, 'AudioQueueNewOutput');
+  FLib.Bind(FAllocateBuffer, 'AudioQueueAllocateBuffer');
+  FLib.Bind(FEnqueueBuffer, 'AudioQueueEnqueueBuffer');
+  FLib.Bind(FStart, 'AudioQueueStart');
+  FLib.Bind(FPause, 'AudioQueuePause');
+  FLib.Bind(FStop, 'AudioQueueStop');
+  FLib.Bind(FReset, 'AudioQueueReset');
+  FLib.Bind(FDispose, 'AudioQueueDispose');
+  FRate := FIXED_RATE;
+  FChannels := FIXED_CHANNELS;
+  FillChar(Desc, SizeOf(Desc), 0);
+  Desc.mSampleRate := FRate;
+  Desc.mFormatID := AQ_FORMAT_LINEAR_PCM;
+  Desc.mFormatFlags := AQ_FLAGS_FLOAT_PACKED;
+  Desc.mBytesPerPacket := FChannels * SizeOf(Single);
+  Desc.mFramesPerPacket := 1;
+  Desc.mBytesPerFrame := FChannels * SizeOf(Single);
+  Desc.mChannelsPerFrame := FChannels;
+  Desc.mBitsPerChannel := 32;
+  FWake := TEvent.Create(nil, False, False, '');
+  // no run loop: the callbacks come on one of the queue's own threads
+  CheckAq(FNewOutput(@Desc, @AqOutputCallback, Self, nil, nil, 0, @FQueue), 'opening an output queue');
+  FBufferFrames := FRate * AQ_PIECE_MS div 1000;
+  SetLength(FBuffers, AQ_BUFFERS);
+  SetLength(FBusy, AQ_BUFFERS);
+  SetLength(FReal, AQ_BUFFERS);
+  SetLength(FGen, AQ_BUFFERS);
+  for I := 0 to AQ_BUFFERS - 1 do
+  begin
+    CheckAq(FAllocateBuffer(FQueue, FBufferFrames * FChannels * SizeOf(Single), @FBuffers[I]),
+      'allocating its buffers');
+    FBuffers[I]^.mUserData := Pointer(NativeInt(I));
+  end;
+  FDescription := Format('AudioQueue (macOS default output device), %d Hz, %d channels, 32-bit float, ' +
+    '%d x %d ms buffers', [FRate, FChannels, AQ_BUFFERS, AQ_PIECE_MS]);
+end;
+
+procedure TFFmpegAudioQueueOutput.BackendRun(AThread: TFFmpegAudioThread);
+var
+  I, Real, Give: Integer;
+  Want, Reset, Running, AtEnd, Fill: Boolean;
+  St: Int32;
+begin
+  Running := False;
+  try
+    while not AThread.IsTerminated do
+    begin
+      FWake.WaitFor(10);
+      FLock.Enter;
+      try
+        Reset := TakeResetRequest;
+        if Reset then
+        begin
+          // what the queue holds now belongs to the time before the seek
+          Inc(FCurGen);
+          FPlayedReal := 0;
+        end;
+        Want := WantPlay;
+      finally
+        FLock.Leave;
+      end;
+      if Reset then
+        FReset(FQueue);   // its buffers come back through the callback, not counted
+      // the free buffers, filled while playing: real sound, silence after it
+      // before the end (the queue keeps running through an underrun), only
+      // the real sound after the end
+      if Want then
+        for I := 0 to High(FBuffers) do
+        begin
+          Fill := False;
+          Real := 0;
+          AtEnd := False;
+          FLock.Enter;
+          try
+            if not FBusy[I] then
+            begin
+              Real := TakeFrames(System.PSingle(FBuffers[I]^.mAudioData), FBufferFrames);
+              AtEnd := EndedLocked;
+              if not (AtEnd and (Real = 0)) then
+              begin
+                Fill := True;
+                FReal[I] := Real;
+                FGen[I] := FCurGen;
+                FBusy[I] := True;
+                Inc(FInFlight);
+              end;
+            end;
+          finally
+            FLock.Leave;
+          end;
+          if not Fill then
+            Continue;
+          Give := FBufferFrames;
+          if AtEnd then
+            Give := Real
+          else if Real < FBufferFrames then
+            FillChar(PByte(FBuffers[I]^.mAudioData)[Real * FChannels * SizeOf(Single)],
+              (FBufferFrames - Real) * FChannels * SizeOf(Single), 0);
+          FBuffers[I]^.mAudioDataByteSize := Give * FChannels * SizeOf(Single);
+          St := FEnqueueBuffer(FQueue, FBuffers[I], 0, nil);
+          if St <> 0 then
+          begin
+            FLock.Enter;
+            try
+              FBusy[I] := False;
+              Dec(FInFlight);
+            finally
+              FLock.Leave;
+            end;
+            SetError(Format('Sound output: the queue took no more sound (OSStatus %d) - device gone? ' +
+              'Play again to use the current device', [St]));
+            Exit;
+          end;
+          SignalSpace;
+        end;
+      // play / pause (after filling: the queue starts with sound in it)
+      if Want and not Running then
+      begin
+        St := FStart(FQueue, nil);
+        if St <> 0 then
+        begin
+          SetError(Format('Sound output: the queue did not start (OSStatus %d)', [St]));
+          Exit;
+        end;
+        Running := True;
+      end
+      else if not Want and Running then
+      begin
+        FPause(FQueue);
+        Running := False;
+      end;
+      FLock.Enter;
+      try
+        SetPlaying(Running);
+        if EndedLocked and (FillLocked = 0) and (FInFlight = 0) then
+          SetDrained;
+      finally
+        FLock.Leave;
+      end;
+    end;
+  finally
+    if Running and (FQueue <> nil) then
+      FStop(FQueue, 1);
+  end;
+end;
+
+procedure TFFmpegAudioQueueOutput.BackendClose;
+begin
+  if FQueue <> nil then
+  begin
+    FStop(FQueue, 1);
+    // frees the buffers too; callbacks may still come until it returns
+    FDispose(FQueue, 1);
+    FQueue := nil;
+  end;
+  FBuffers := nil;
+  FreeAndNil(FWake);
   FreeAndNil(FLib);
 end;
 {$endif}
