@@ -7,7 +7,8 @@ this file is silent, TWhisper's rules apply.
 ## Handover - READ THIS FIRST (session 6, 2026-11-15 evening)
 The full handover (all four repositories, rules, results, open items) is
 at the top of TWhisper's and Epubunum's CLAUDE.md. For this repository:
-- Pushes checked: 105ffe7 = FFmpegAPI-11 (nothing delivered since).
+- Pushes checked: 105ffe7 = FFmpegAPI-11; 3edcfa3 = FFmpegAPI-12 (this
+  handover, CLAUDE.md only). FFmpegAPI-13 = the review fixes below.
 - NEXT here: macOS audio output (AudioQueue) - EpubReader is silent on
   macOS until TFFmpegAudioPlayer has one; it is the biggest gap before
   macOS (agreed order: Linux first, then macOS).
@@ -19,7 +20,9 @@ Pascal binding of FFmpeg 8's shared libraries (avutil 60, swresample 6,
 avcodec 62, avformat 62, swscale 9), loaded DYNAMICALLY at run time: no
 `external` declarations, no static linking. Split out of TWhisper
 (Whisper.FFmpeg) on the owner's request (2026-11-14: "it's own repo then we
-can submodule it"). TWhisper uses it as a submodule.
+can submodule it"). NOT a submodule any more (owner, 2026-11-14 23:14):
+TWhisper and Epubunum's programs use it as an installed component - its
+runtime package FFmpegAPI.
 
 Owner's decisions (2026-11-14):
 - "We should allow for video but not use it - completeness": video streams
@@ -92,7 +95,7 @@ the design-time package.
   (which unit changed), and what to rebuild after them (programs, other
   repos' packages). Otherwise say "NO PACKAGE REBUILD", in capitals.
 
-Last number used: 12.
+Last number used: 13.
 
 Last push: 0761ff2 ("latest for Claude", checked): zips 04 and 05 match,
 but dclFFmpegAPIFMX.dproj was back on Win64 (zip 03's Win32 line lost) -
@@ -158,6 +161,65 @@ every Play reopens the file (moov scan + find_stream_info); Active := True
 fails silently without OnOpenFailed; the bare-name load uses the OS search
 path (current directory on Windows); the repository has no LICENSE of its
 own.
+
+## Review fixes (zip 13, on top of 3edcfa3 = zip 12)
+A code review by reading of 3edcfa3 (owner, 2026-11-16: "Same for
+TFFMpegAPI", then "y + claude.md"). Read: all of lib/ except
+FFmpeg.DynLib. NOT read: FFmpegConsole, the FMX units, the tools. NOT
+COMPILED OR RUN (no Delphi, no FPC, no FFmpeg, no sound server in that
+session); pasdoc_check, project_check 0 problems; ffmpeg_layout.py not
+run (no headers; no record or offset changed).
+1. FFmpeg.AudioOut, PulseAudio: Drained needed pa_simple_get_latency to
+   be exactly 0. That figure can hold the device's own latency and stay
+   above 0 (and is (pa_usec_t) -1 after an error): Drained - so the
+   player's Ended - could stay False for ever (no next audio file, a
+   PlayRange that never ends). Now also drained when the last piece was
+   written longer ago than the latency measured then (at most 2 s, 100
+   ms when not known) + 50 ms. An error figure is taken as 0 for the
+   clock. UNVERIFIED that the old test failed on the owner's system (not
+   run here): TO TEST on Linux - FFmpegConsole <file> --play --start S
+   --end E must print Ended True and stop by itself; a book with two
+   audio files goes on into the second.
+2. FFmpeg.AudioOut, WASAPI: a device that is gone (GetCurrentPadding
+   failing with AUDCLNT_E_DEVICE_INVALIDATED, or 100 turns = 2 s in a
+   row) sets LastError and ends the output thread (it failed silently
+   for ever: no sound, no message). FFmpeg.Player, StartFeed: an output
+   of the player's OWN with a LastError is freed and CreateDefault opens
+   the device that is the default now - so the next Play recovers (the
+   reader stops with the note; Play again). Output is then a new object.
+   The same recovery serves a PulseAudio write error. TO TEST on
+   Windows: play, pull the headphones / switch the output device - the
+   reader stops with a message; Play goes on on the new device.
+3. FFmpeg.Media, TFFmpegDecoder: FCancelled is cleared when a run ENDS
+   (FWasCancelled keeps it for Cancelled), not when it starts: a Cancel
+   while the worker was still opening the file was dropped and closing
+   waited for the whole decode. Consequence: Cancel on an idle decoder
+   stops its next read. FFmpeg.Components, TFFmpegDecodeThread: FDecoder
+   is published, cancelled and withdrawn under a lock (Cancel read it
+   while Execute freed it); Cancel sets Terminated first and Execute
+   tests it under the lock. TO TEST: DecodeAsync of a long file, then
+   Close at once - returns at once.
+4. TFFmpegAudioDecoder.Create: the stream number is range-checked before
+   Streams[AStream] is read.
+5. TCustomFFmpegAudio.SetActive: a failed Active := True without an
+   OnOpenFailed handler is shown (ShowHandlerException), as TWhisperAPI
+   does - it was swallowed.
+FOUND AND NOT FIXED (owner to decide):
+- TFFmpegAudioOutput.Create: when the device does not open within
+  OPEN_TIMEOUT_MS the constructor raises and Destroy then waits for the
+  thread still inside BackendOpen - a sound server that hangs hangs the
+  program instead of giving the silent output. A safe fix changes how
+  outputs are made (the object must outlive the stuck thread): not done
+  without a compiler and a sound server.
+- Any av_read_frame error counts as the end of the file (a cut or
+  unreadable file = a shorter decode, in EpubBuilder a shorter
+  transcript, with no sign): a ReadError property for the callers to log.
+- Every Play opens the file again - with the protection check's read of
+  the moov box (up to 64 MB) each time: every clip jump in the reader.
+- LoadFilters loads swscale without checking its version or licence.
+- PulseAudio: Pause lets the ~100 ms already at the server play on.
+- The bare-name load uses the OS search path (current directory on
+  Windows). No LICENSE file (public repository).
 
 ## Play range and speed (zip 09, on top of cb56479 "Claude review push")
 Owner, 2026-11-15: the reader's "learn to read" idea (EpubUnum CLAUDE.md,

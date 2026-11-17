@@ -16,7 +16,7 @@ unit FFmpeg.Components;
 interface
 
 uses
-  SysUtils, Classes,
+  SysUtils, Classes, SyncObjs,
   FFmpeg.API, FFmpeg.Media;
 
 {$ifndef FPC}
@@ -53,8 +53,12 @@ type
     FRate: Integer;
     { Output channels (0 = the stream's). }
     FChannels: Integer;
-    { The decoder while it runs (for Cancel). }
+    { The decoder while it runs (for Cancel); read and written under
+      FLock. }
     FDecoder: TFFmpegAudioDecoder;
+    { Guards FDecoder: Cancel comes from the main thread while Execute
+      makes and frees the decoder. }
+    FLock: TCriticalSection;
     { The result. }
     FSamples: TFFmpegSamples;
     { '' or what failed. }
@@ -68,7 +72,9 @@ type
     { A decode of AStart..AEnd of AFileName for AOwner (not started). }
     constructor Create(AOwner: TCustomFFmpegAudio; const AFileName: string; AStart, AEnd: Double;
       ARate, AChannels: Integer);
-    { Asks the decoder to stop. }
+    { Frees the lock. }
+    destructor Destroy; override;
+    { Asks the decode to stop: at once when it has not started reading. }
     procedure Cancel;
   end;
 
@@ -232,28 +238,58 @@ begin
   FEnd := AEnd;
   FRate := ARate;
   FChannels := AChannels;
+  FLock := TCriticalSection.Create;
+end;
+
+destructor TFFmpegDecodeThread.Destroy;
+begin
+  inherited;   // the thread has ended before the lock goes
+  FreeAndNil(FLock);
 end;
 
 procedure TFFmpegDecodeThread.Cancel;
 begin
-  if FDecoder <> nil then
-    FDecoder.Cancel;
+  // Terminated first: Execute tests it under the lock once the decoder is
+  // there, so a cancel is seen whichever side of that it falls on
   Terminate;
+  FLock.Enter;
+  try
+    if FDecoder <> nil then
+      FDecoder.Cancel;
+  finally
+    FLock.Leave;
+  end;
 end;
 
 procedure TFFmpegDecodeThread.Execute;
 var
   F: TFFmpegMediaFile;
+  Dec_: TFFmpegAudioDecoder;
+  Go: Boolean;
 begin
   try
     F := TFFmpegMediaFile.Create(FOwner.Lib, FFileName);
     try
-      FDecoder := TFFmpegAudioDecoder.Create(F, -1, FRate, FChannels);
+      Dec_ := TFFmpegAudioDecoder.Create(F, -1, FRate, FChannels);
       try
-        if not Terminated then
-          FSamples := FDecoder.Read(FStart, FEnd);
+        FLock.Enter;
+        try
+          FDecoder := Dec_;
+          Go := not Terminated;
+        finally
+          FLock.Leave;
+        end;
+        if Go then
+          FSamples := Dec_.Read(FStart, FEnd);
       finally
-        FreeAndNil(FDecoder);
+        // out of Cancel's reach before it is freed
+        FLock.Enter;
+        try
+          FDecoder := nil;
+        finally
+          FLock.Leave;
+        end;
+        Dec_.Free;
       end;
     finally
       F.Free;
@@ -340,7 +376,11 @@ begin
           except
             on H: Exception do
               ShowHandlerException(H);
-          end;
+          end
+        else
+          // no silent failure (as TWhisperAPI): shown, never raised - from
+          // Loaded it would end the program before the form is there
+          ShowHandlerException(E);
       end;
     end;
   end

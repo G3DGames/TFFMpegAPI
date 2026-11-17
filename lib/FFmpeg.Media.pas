@@ -199,8 +199,11 @@ type
     FTimeBase: Double;
     { Backing field of @link(DecodeErrors). }
     FDecodeErrors: Integer;
-    { Backing field of @link(Cancelled). }
+    { A stop was asked for (@link(Cancel)): the read in progress ends, or
+      the next one does not start. Cleared when a read ends. }
     FCancelled: Boolean;
+    { Backing field of @link(Cancelled): the last read ended by Cancel. }
+    FWasCancelled: Boolean;
   protected
     { Takes one decoded frame at ATime seconds (on the file's time line);
       returns False to stop reading. }
@@ -223,14 +226,15 @@ type
     property MediaFile: TFFmpegMediaFile read FFile;
     { The stream decoded. }
     property Stream: Integer read FStream;
-    { Asks a read in progress to stop (any thread): it stops at the next
-      packet and returns what it has; @link(Cancelled) tells. Reset by the
-      next read. }
+    { Asks a read to stop (any thread): one in progress stops at the next
+      packet and returns what it has; with none in progress the NEXT read
+      stops at once (a cancel just before a read starts is not lost).
+      Cleared when that read ends. }
     procedure Cancel;
     { Packets the decoder rejected so far (damaged data is skipped). }
     property DecodeErrors: Integer read FDecodeErrors;
     { The last read was stopped by @link(Cancel). }
-    property Cancelled: Boolean read FCancelled;
+    property Cancelled: Boolean read FWasCancelled;
   end;
 
   { Decodes an audio stream to interleaved 32-bit float. }
@@ -709,42 +713,51 @@ begin
   F := FFile.Lib.Flat;
   Result := False;
   Stop := False;
-  FCancelled := False;
-  // the position is the file's (its demuxer's), not this decoder's: a new
-  // decoder on a file another one has read must seek, also to 0
-  if FFile.FUsed or (AStart > 0) then
-  begin
-    if FTimeBase > 0 then
-      FFile.Check(F.av_seek_frame(FFile.Handle, FStream, Round((AStart + FFile.StartOffset) / FTimeBase),
-        AVSEEK_FLAG_BACKWARD), 'seek in');
-    F.avcodec_flush_buffers(FCodec);
-  end;
-  FFile.FUsed := True;
-  while not Stop do
-  begin
-    if FCancelled then
-      Break;
-    R := F.av_read_frame(FFile.Handle, FPacket);
-    if R < 0 then
+  // FCancelled is NOT cleared here: a Cancel that came before the run
+  // started (the worker was still opening the file) must stop it - it was
+  // dropped, and closing waited for the whole decode. It is cleared when
+  // the run ends (Cancelled keeps the answer).
+  FWasCancelled := False;
+  try
+    // the position is the file's (its demuxer's), not this decoder's: a new
+    // decoder on a file another one has read must seek, also to 0
+    if FFile.FUsed or (AStart > 0) then
     begin
-      // end of file (or a read error: decode what there is)
-      F.avcodec_send_packet(FCodec, nil);
-      Drain;
-      Result := True;
-      Break;
+      if FTimeBase > 0 then
+        FFile.Check(F.av_seek_frame(FFile.Handle, FStream, Round((AStart + FFile.StartOffset) / FTimeBase),
+          AVSEEK_FLAG_BACKWARD), 'seek in');
+      F.avcodec_flush_buffers(FCodec);
     end;
-    if FFmpegI32(FPacket, FFOFS_PACKET_STREAM_INDEX) = FStream then
+    FFile.FUsed := True;
+    while not Stop do
     begin
-      if F.avcodec_send_packet(FCodec, FPacket) < 0 then
-        Inc(FDecodeErrors);
-      F.av_packet_unref(FPacket);
-      Drain;
-    end
-    else
-      F.av_packet_unref(FPacket);
+      if FCancelled then
+        Break;
+      R := F.av_read_frame(FFile.Handle, FPacket);
+      if R < 0 then
+      begin
+        // end of file (or a read error: decode what there is)
+        F.avcodec_send_packet(FCodec, nil);
+        Drain;
+        Result := True;
+        Break;
+      end;
+      if FFmpegI32(FPacket, FFOFS_PACKET_STREAM_INDEX) = FStream then
+      begin
+        if F.avcodec_send_packet(FCodec, FPacket) < 0 then
+          Inc(FDecodeErrors);
+        F.av_packet_unref(FPacket);
+        Drain;
+      end
+      else
+        F.av_packet_unref(FPacket);
+    end;
+    if Result then
+      EndOfStream;
+  finally
+    FWasCancelled := FCancelled;
+    FCancelled := False;
   end;
-  if Result then
-    EndOfStream;
 end;
 
 { TFFmpegAudioDecoder }
@@ -758,6 +771,9 @@ begin
     raise EFFmpegError.Create('A decoder needs an open TFFmpegMediaFile');
   if AStream < 0 then
     raise EFFmpegError.CreateFmt('%s has no audio stream', [AFile.FileName]);
+  // before Streams[AStream] is looked at (the inherited check came after)
+  if AStream > High(AFile.Streams) then
+    raise EFFmpegError.CreateFmt('%s has no stream %d', [AFile.FileName, AStream]);
   if AFile.Streams[AStream].Kind <> fmkAudio then
     raise EFFmpegError.CreateFmt('%s: stream %d is not audio', [AFile.FileName, AStream]);
   inherited Create(AFile, AStream);

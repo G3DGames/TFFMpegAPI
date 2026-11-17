@@ -651,6 +651,15 @@ begin
   if FFileName = '' then
     raise EFFmpegError.Create('No file is open');
   StopFeed;
+  // an output that stopped with an error (its device was unplugged or
+  // switched, the sound server went away) plays nothing more: a new one
+  // on the device that is the default now - only our own; an output the
+  // caller gave stays the caller's to replace
+  if FOwnsOutput and (FOutput.LastError <> '') then
+  begin
+    FreeAndNil(FOutput);
+    FOutput := TFFmpegAudioOutput.CreateDefault(FOutputNote, OUTPUT_BUFFER_SECONDS);
+  end;
   FOutput.Pause;
   AFrom := Max(AFrom, 0);
   // the output's clock counts the sound played; at another speed the file

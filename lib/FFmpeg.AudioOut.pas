@@ -698,6 +698,12 @@ const
   PULSE_PIECE_MS = 10;
   { The playback buffer asked for, ms. }
   PULSE_BUFFER_MS = 100;
+  { pa_simple_get_latency's answer when it failed: (pa_usec_t) -1. }
+  PULSE_NO_LATENCY = High(UInt64);
+  { Longest latency believed, s (a wild figure must not hold the end up). }
+  PULSE_MAX_LATENCY = 2.0;
+  { Added to the latency before the sound counts as played out, s. }
+  PULSE_DRAIN_MARGIN = 0.05;
 
 procedure TFFmpegPulseOutput.BackendOpen;
 var
@@ -735,10 +741,13 @@ var
   Piece: array of Single;
   Frames, Got, Err: Integer;
   Lat: UInt64;
-  Playing, Reset: Boolean;
+  Playing, Reset, Wrote: Boolean;
+  LastWrite, LatAtWrite: Double;
 begin
   Frames := FRate * PULSE_PIECE_MS div 1000;
   SetLength(Piece, Frames * FChannels);
+  LastWrite := 0;
+  LatAtWrite := 0;
   while not AThread.IsTerminated do
   begin
     FLock.Enter;
@@ -753,8 +762,13 @@ begin
       FLock.Leave;
     end;
     if Reset then
+    begin
       FFlush(FStream, @Err);
-    if Got > 0 then
+      LastWrite := 0;
+      LatAtWrite := 0;
+    end;
+    Wrote := Got > 0;
+    if Wrote then
     begin
       SignalSpace;
       // blocks until the server has room: this paces the loop
@@ -767,10 +781,27 @@ begin
     else
       Sleep(5);
     Lat := FLatency(FStream, @Err);
+    if Lat = PULSE_NO_LATENCY then
+      Lat := 0;   // not known: nothing taken off what was handed over
+    if Wrote then
+    begin
+      // when the last piece went to the server, and how long the server
+      // then said it takes to be heard (its buffer and the device's)
+      LastWrite := FFmpegMonotonicSeconds;
+      LatAtWrite := Min(Lat / 1000000, PULSE_MAX_LATENCY);
+      if LatAtWrite <= 0 then
+        LatAtWrite := PULSE_BUFFER_MS / 1000;
+    end;
     FLock.Enter;
     try
       ReportPlayed(RealWrittenLocked - Int64(Lat) * FRate div 1000000);
-      if EndedLocked and (FillLocked = 0) and (Lat = 0) then
+      // played out: the server says nothing waits - or, as its figure can
+      // hold the device's own latency and never reach 0 (and is no figure
+      // at all after an error), the last piece was written longer ago
+      // than it took to be heard. Without the second test Drained could
+      // stay False for ever: no Ended, no next audio file.
+      if EndedLocked and (FillLocked = 0) and ((Lat = 0) or
+        (FFmpegMonotonicSeconds - LastWrite >= LatAtWrite + PULSE_DRAIN_MARGIN)) then
         SetDrained;
     finally
       FLock.Leave;
@@ -815,6 +846,11 @@ const
   WAVE_FORMAT_EXTENSIBLE = $FFFE;
   { The device buffer asked for: 100 ms, in 100-ns units. }
   DEVICE_BUFFER_HNS = 1000000;
+  { The endpoint is gone: unplugged, disabled, or its format was changed. }
+  AUDCLNT_E_DEVICE_INVALIDATED = HRESULT($88890004);
+  { Failed turns in a row (20 ms each) after which the device counts as
+    lost whatever its error says: two seconds. }
+  MAX_DEVICE_FAILS = 100;
 
 type
   { WAVEFORMATEXTENSIBLE: a WAVEFORMATEX (packed, 18 bytes) and the rest. }
@@ -969,13 +1005,15 @@ var
   Client: IAudioClient;
   Render: IAudioRenderClient;
   Padding: UINT32;
-  Want, Real, Give: Integer;
+  Want, Real, Give, Fails: Integer;
   Data: PByte;
   Running, AtEnd: Boolean;
+  HR: HRESULT;
 begin
   Client := FClient as IAudioClient;
   Render := FRender as IAudioRenderClient;
   Running := False;
+  Fails := 0;
   try
     while not AThread.IsTerminated do
     begin
@@ -1006,8 +1044,24 @@ begin
       end;
       if not Running then
         Continue;
-      if Failed(Client.GetCurrentPadding(Padding)) then
+      // a device that is gone (headphones unplugged, another output
+      // chosen in Windows) fails here on every turn, for ever: it was
+      // passed over in silence - no sound, no error, the clock stopped.
+      // Now LastError says so and the output stops; TFFmpegAudioPlayer
+      // opens the default device afresh at its next Play.
+      HR := Client.GetCurrentPadding(Padding);
+      if Failed(HR) then
+      begin
+        Inc(Fails);
+        if (HR = AUDCLNT_E_DEVICE_INVALIDATED) or (Fails >= MAX_DEVICE_FAILS) then
+        begin
+          SetError(Format('Sound output: the device is gone or no longer answers (HRESULT $%.8x) - ' +
+            'unplugged or switched? Play again to use the current device', [Cardinal(HR)]));
+          Break;
+        end;
         Continue;
+      end;
+      Fails := 0;
       Want := Integer(FBufferFrames) - Integer(Padding);
       FLock.Enter;
       try

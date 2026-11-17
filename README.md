@@ -102,7 +102,8 @@ and `CoverArt` are there.
 - `SampleRate` / `Channels` (0 = the stream's) set the output format.
 - `LicencePolicy` and `LibraryFolder` choose the libraries; `Description`
   shows what was loaded.
-- `OnOpen`, `OnOpenFailed`, `OnClose`. Exceptions raised in handlers are
+- `OnOpen`, `OnOpenFailed` (a failure of `Active := True`; without a handler
+  it is shown, never raised), `OnClose`. Exceptions raised in handlers are
   shown with `Application.ShowException`.
 
 A console program that uses `TCustomFFmpegAudio` with `DecodeAsync` must
@@ -155,6 +156,12 @@ back to the silent one, saying why (`TFFmpegAudioPlayer.OutputNote`): a
 reader still follows the text with no sound device. macOS (AudioQueue) and
 Android come later. `FFmpegConsole <file> --play [--start S] [--end S]
 [--speed X]` tries it.
+
+An output whose device goes away while it plays (headphones unplugged,
+another output chosen in Windows, the sound server gone) stops and says
+so in `LastError`; `TFFmpegAudioPlayer` then opens the default device
+afresh at its next `Play` / `PlayRange` (its own output only - one you
+passed in is yours to replace), and `Output` is then a new object.
 
 A Free Pascal program on Linux / macOS must list `cthreads` first in its
 uses clause (threads).
